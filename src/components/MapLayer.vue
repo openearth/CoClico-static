@@ -1,6 +1,5 @@
 <template>
   <MapboxLayer
-    v-if="layer"
     :id="layer.id"
     :options="layer"
     @mb-click="onLayerClicked"
@@ -9,35 +8,32 @@
   >
   </MapboxLayer>
 </template>
-<script>
-import { MapboxLayer } from "@studiometa/vue-mapbox-gl";
-import { useMap } from "@studiometa/vue-mapbox-gl";
-import { unref } from "vue";
+<script setup>
+import { MapboxLayer, useMap } from "@studiometa/vue-mapbox-gl";
+import { onBeforeUnmount, onMounted, ref } from "vue";
 
-export default {
-  mounted() {
-    const { map } = useMap();
-    this.map = map;
+const props = defineProps({
+  layer: {
+    type: Object,
+    default: () => {},
   },
-  props: {
-    layer: {
-      type: Object,
-      default: () => {},
-    },
-  },
-  components: {
-    MapboxLayer,
-  },
-  methods: {
-    onLayerClicked(e) {
-      this.$emit("click", e.features[0]);
-    },
-    onMouseenter() {
-      unref(this.map).getCanvas().style.cursor = "pointer";
-    },
-    onMouseleave() {
-      unref(this.map).getCanvas().style.cursor = "";
-    },
-  },
+});
+const emit = defineEmits(["click"]);
+let mapRef = ref();
+
+onMounted(() => {
+  mapRef.value = useMap();
+});
+
+onBeforeUnmount(() => {
+  mapRef.value.map.removeLayer(props.layer.id);
+});
+
+const onLayerClicked = (e) => emit("click", e.features[0]);
+const onMouseenter = () => {
+  mapRef.value.map.getCanvas().style.cursor = "pointer";
+};
+const onMouseleave = () => {
+  mapRef.value.map.getCanvas().style.cursor = "";
 };
 </script>

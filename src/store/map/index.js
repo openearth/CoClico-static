@@ -1,9 +1,6 @@
 import getCatalog from "@/lib/request/get-catalog";
-import buildGeojsonMapboxLayer from "@/lib/mapbox/build-geojson-mapbox-layer";
-import buildRasterMapboxLayer from "@/lib/mapbox/build-raster-mapbox-layer";
-import matchLayerIdToProperties from "@/lib/match-layer-id-to-properties.js";
-import buildVectorTilesMapboxLayer from "@/lib/mapbox/build-vector-tiles-mapbox-layer";
-import { compact, get, has, set } from "lodash-es";
+import { getLayerType, getResourceLayers } from "@/lib/layers";
+import { getCollections } from "@/lib/catalog";
 
 export default {
   namespaced: true,
@@ -12,10 +9,10 @@ export default {
     datasets: [],
     activeTheme: null,
     activeDatasets: [],
+    mapboxSources: [],
     mapboxLayers: [], //wmsLayers state have the format that is needed to add the layers on the map
     seaLevelRiseData: {},
-    activeClickableDataset: null,
-    clickableDatasetsIds: ["cfhp", "slp", "ssl", "eesl", "sc", "cfr", "cbca"], // Not all layers are clickable. Only the ones in user stories.
+    clickableDatasetsIds: [], // Not all layers are clickable. Only the ones in user stories.
     // perhaps we can provide that from the catalog.
   },
   getters: {
@@ -29,10 +26,9 @@ export default {
       if (!state.activeTheme) {
         return state.datasets;
       }
-      const filteredDatasets = state.datasets.filter((dataset) =>
+      return state.datasets.filter((dataset) =>
         dataset?.keywords?.includes(state.activeTheme)
       );
-      return filteredDatasets;
     },
     activeDatasets(state) {
       return state.activeDatasets;
@@ -43,11 +39,16 @@ export default {
     mapboxLayers(state) {
       return state.mapboxLayers;
     },
+    mapboxSources(state) {
+      return state.mapboxSources;
+    },
     seaLevelRiseData(state) {
       return state.seaLevelRiseData;
     },
     activeClickableDataset(state) {
-      return state.activeClickableDataset;
+      return state.activeDatasets.find((dataset) =>
+        state.clickableDatasetsIds.includes(dataset.id)
+      );
     },
   },
   mutations: {
@@ -72,9 +73,11 @@ export default {
     },
     ADD_ACTIVE_DATASET(state, dataset) {
       state.activeDatasets = [dataset, ...state.activeDatasets];
-      // Set clickableDataset TODO: to be improved
-      if (state.clickableDatasetsIds.includes(state.activeDatasets[0].id)) {
-        state.activeClickableDataset = state.activeDatasets[0];
+      const activeClickableDataset = state.activeDatasets.find(({ id }) =>
+        state.clickableDatasetsIds.includes(id)
+      );
+      if (activeClickableDataset) {
+        state.activeClickableDataset = activeClickableDataset;
       }
     },
     REMOVE_ACTIVE_DATASET(state, id) {
@@ -93,9 +96,21 @@ export default {
     ADD_MAPBOX_LAYER(state, mapboxLayer) {
       state.mapboxLayers = [...state.mapboxLayers, mapboxLayer];
     },
+    ADD_CLICKABLE_LAYER(state, layer) {
+      const id = layer.id.replace("_geoserver_link", "");
+      state.clickableDatasetsIds = [...state.clickableDatasetsIds, id];
+    },
     REMOVE_MAPBOX_LAYER(state, id) {
       state.mapboxLayers = state.mapboxLayers.filter(
         (mapboxLayer) => mapboxLayer.id !== id
+      );
+    },
+    ADD_MAPBOX_SOURCE(state, mapboxSource) {
+      state.mapboxSources = [...state.mapboxSources, mapboxSource];
+    },
+    REMOVE_MAPBOX_SOURCE(state, id) {
+      state.mapboxSources = state.mapboxSources.filter(
+        (mapboxSource) => mapboxSource.id !== id
       );
     },
     SET_SEA_LEVEL_RISE_DATA(state, data) {
@@ -109,75 +124,19 @@ export default {
     removeMapboxLayer({ commit }, id) {
       commit("REMOVE_MAPBOX_LAYER", id);
     },
-    loadDatasets({ commit }) {
-      //Get STAC collection
-      getCatalog(process.env.VUE_APP_CATALOG_URL)
-        //1. first  we get the parent catalog
-        .then((catalog) => {
-          //2. read themes from the main catalog
-          const keywords = get(catalog, "summaries.keywords");
-          keywords.forEach((keyword) =>
-            commit("ADD_THEME", { name: keyword, count: 0 })
-          );
-          //3. get collections of the catalog
-          const collections = catalog.links.filter((el) => el.rel === "child");
-          collections.forEach((collection) => {
-            getCatalog(collection.href)
-              //get collection information (let's name it dataset)
-              .then((dataset) => {
-                // 4. exlude dataset with id template
-                if (dataset.id !== "template") {
-                  // 4.a add allowedValues and chosenValue to the dataset
-                  const summaries =
-                    get(dataset, "summaries") || get(catalog, "summaries");
-                  const summaryDescriptions =
-                    get(dataset, "summary_descriptions") ||
-                    get(catalog, "summary_descriptions") ||
-                    {};
-                  const mappedSummaries = Object.keys(summaries).map((id) => {
-                    const summary = get(summaries, id);
-                    return {
-                      id: id,
-                      description: summaryDescriptions[id],
-                      allowedValues: summary,
-                      chosenValue: summary[0],
-                    };
-                  });
-                  set(dataset, "summaries", mappedSummaries);
-                  // 4.b. add variables to the dataset
-                  const variables = get(dataset, "cube:variables");
-
-                  if (typeof variables !== "undefined") {
-                    var mappedVariables = Object.keys(variables).map((id) => {
-                      const variable = get(variables, id);
-                      if (variable.type === "data") {
-                        return {
-                          id: id,
-                        };
-                      }
-                    });
-                    mappedVariables = compact(mappedVariables);
-
-                    const mappedVariablesArray = mappedVariables.map(
-                      (a) => a.id
-                    );
-                    if (mappedVariablesArray.length !== 0) {
-                      set(dataset, "variables", mappedVariablesArray);
-                    }
-                  }
-                  // add transparent layer item to dataset if exists
-                  const transparentLayer = get(
-                    dataset,
-                    "assets.geoserver_link"
-                  );
-                  if (transparentLayer) {
-                    set(dataset, "transparentLayer", transparentLayer);
-                  }
-                  commit("ADD_DATASET", dataset);
-                }
-              });
-          });
-        });
+    addMapboxSource({ commit }, mapboxSource) {
+      commit("ADD_MAPBOX_SOURCE", mapboxSource);
+    },
+    removeMapboxSource({ commit }, id) {
+      commit("REMOVE_MAPBOX_SOURCE", id);
+    },
+    async loadDatasets({ commit }) {
+      const catalog = await getCatalog(process.env.VUE_APP_CATALOG_URL);
+      catalog?.summaries?.keywords.forEach((keyword) =>
+        commit("ADD_THEME", { name: keyword, count: 0 })
+      );
+      const collections = await getCollections(catalog);
+      collections.forEach((collection) => commit("ADD_DATASET", collection));
     },
     setActiveTheme({ commit }, theme) {
       commit("SET_ACTIVE_THEME", theme);
@@ -191,31 +150,17 @@ export default {
         count: countActiveDatasets,
       });
     },
-    loadDatasetOnMap({ commit }, dataset) {
-      const layer = matchLayerIdToProperties(dataset);
-      if (!layer) {
-        return;
-      }
-      //Sometimes like in the case of cfhp we have to add two layer on the map. The one for visualization and the one for the click event
-      // if transparent layer add it to the map
-      if (dataset.transparentLayer) {
-        const transparentLayer = buildVectorTilesMapboxLayer(
-          dataset.transparentLayer.href
-        );
-        commit("ADD_MAPBOX_LAYER", transparentLayer);
-      }
-      //Check if the layer is vector or a raster
-      const layerType = has(dataset, "cube:dimensions") ? "vector" : "raster";
-
-      getCatalog(layer.href).then((layerInfo) => {
-        layerInfo.id = dataset.id; // I will use the dataset id
-        if (layerType === "vector") {
-          commit("ADD_MAPBOX_LAYER", buildGeojsonMapboxLayer(layerInfo));
-        } else {
-          const rasterMapboxLayer = buildRasterMapboxLayer(layerInfo);
-          commit("ADD_MAPBOX_LAYER", rasterMapboxLayer);
-        }
-      });
+    async loadDatasetOnMap({ commit }, dataset) {
+      const layers = await getResourceLayers(dataset);
+      await Promise.all(
+        layers.map((layer) => {
+          const layerType = getLayerType(layer);
+          if (layerType === "clickable") {
+            commit("ADD_CLICKABLE_LAYER", layer);
+          }
+          commit("ADD_MAPBOX_LAYER", layer);
+        })
+      );
     },
     //Used when new selections have been made
     reloadDatasetOnMap({ commit, dispatch }, dataset) {
@@ -223,24 +168,23 @@ export default {
       dispatch("loadDatasetOnMap", dataset);
     },
     updateActiveDatasetsArray({ state, commit, dispatch }, dataset) {
-      const datasetExist = state.activeDatasets.find(
+      const datasetExist = state.activeDatasets.some(
         (activeDataset) => activeDataset.id === dataset.id
       );
       if (datasetExist) {
         commit("REMOVE_ACTIVE_DATASET", dataset.id);
-        commit("REMOVE_MAPBOX_LAYER", dataset.id);
-
+        commit("REMOVE_MAPBOX_LAYER", `${dataset.id}_visual`);
+        commit("REMOVE_MAPBOX_LAYER", `${dataset.id}_mapbox`);
+        commit("REMOVE_MAPBOX_LAYER", `${dataset.id}`);
         // if transparent layer remove also this one
-        if (dataset.transparentLayer) {
-          commit("REMOVE_MAPBOX_LAYER", "lau_nuts_cfhp");
-          commit("REMOVE_MAPBOX_LAYER", "cfhp_focused");
-        }
+        if (!dataset?.assets?.["geoserver_link"]) return;
+        commit("REMOVE_MAPBOX_LAYER", "lau_nuts_cfhp");
+        commit("REMOVE_MAPBOX_LAYER", "cfhp_focused");
       } else {
         commit("ADD_ACTIVE_DATASET", dataset);
         dispatch("loadDatasetOnMap", dataset);
       }
     },
-
     setSeaLevelRiseData({ commit }, graph) {
       commit("SET_SEA_LEVEL_RISE_DATA", graph);
     },

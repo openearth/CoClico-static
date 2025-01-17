@@ -16,6 +16,7 @@ const getGraphType = (id) => {
     sc: graphTypes.LINE_CHART,
     slp: graphTypes.SEA_LEVEL_RISE,
     ssl: graphTypes.LINE_CHART,
+    cba: graphTypes.FLOOD_EXTEND,
   }[id];
   return graphType || graphTypes.LINE_CHART;
 };
@@ -53,11 +54,10 @@ export default {
       }
       const datasetId = currentGraphDataset.id;
       const graphType = getGraphType(datasetId);
-      if (has(currentGraphDataset, "transparentLayer")) {
+      if (currentGraphDataset?.assets?.geoserver_link) {
         const mapboxLayer = mapboxLayers.find(
-          (layer) => layer.id === currentGraphDataset.id
+          (layer) => layer.id === `${currentGraphDataset.id}_visual`
         );
-
         const graphData = getDataFromMapbox(mapboxLayer, features.properties);
         commit("ADD_GRAPH_DATA", {
           ...graphData,
@@ -109,7 +109,7 @@ export default {
               console.error("Error getting zarr data:", error);
             }
           } else {
-            console.log("Mapbox data not implemented yet");
+            console.error("Mapbox data not implemented yet");
           }
         }
       }

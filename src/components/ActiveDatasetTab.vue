@@ -49,18 +49,7 @@
         </v-col>
       </v-row>
       <!-- TODO: check if the condition of the old viewer && dataset.id === activeRasterDatasetId should also be implemented here -->
-      <v-row
-        v-if="checkLayerType(dataset) === 'vector' && activeLegend(dataset)"
-      >
-        <v-col>
-          <layer-legend :dataset="dataset" />
-        </v-col>
-      </v-row>
-      <!-- TODO: check if the condition of the old viewer && dataset.id === activeRasterDatasetId should also be implemented here
-      TODO: check why the raster layer is not picked up. In the old live version it does not work either -->
-      <v-row
-        v-if="checkLayerType(dataset) === 'raster' && activeLegend(dataset)"
-      >
+      <v-row v-if="hasLegend(dataset)">
         <v-col>
           <layer-legend :dataset="dataset" />
         </v-col>
@@ -78,35 +67,33 @@
     </v-container>
   </v-card>
 </template>
-<script>
-import LayerLegend from "./LayerLegend.vue";
-import { mapActions } from "vuex";
-import { has } from "lodash-es";
 
-export default {
-  props: {
-    datasets: {
-      type: Array,
-      default: () => [],
-    },
+<script setup>
+import LayerLegend from "./LayerLegend.vue";
+import { useStore } from "vuex";
+import { computed } from "vue";
+import { hasLegend } from "@/lib/layers";
+
+const store = useStore();
+const props = defineProps({
+  datasets: {
+    type: Array,
+    default: () => [],
   },
-  components: {
-    LayerLegend,
-  },
-  methods: {
-    ...mapActions("map", ["reloadDatasetOnMap"]),
-    reloadDataset(dataset) {
-      this.reloadDatasetOnMap(dataset);
-    },
-    checkLayerType(dataset) {
-      return has(dataset, "cube:dimensions") ? "vector" : "raster";
-    },
-    activeLegend(dataset) {
-      return has(dataset, "deltares:linearGradient");
-    },
-  },
+});
+
+const datasets = computed(() =>
+  props.datasets.map((dataset) => ({
+    ...dataset,
+    summaries: dataset.summaries.filter(({ id }) => id !== "keywords"),
+  }))
+);
+
+const reloadDataset = (dataset) => {
+  store.dispatch("map/reloadDatasetOnMap", dataset);
 };
 </script>
+
 <style>
 .text-style {
   background: #f0f0f0;

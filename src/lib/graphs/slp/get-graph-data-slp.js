@@ -30,6 +30,6 @@ export default async function (dataset, lng, lat) {
     await Promise.all(promises);
     return seaLevelRiseData;
   } catch (error) {
-    console.log(error);
+    console.error(error);
   }
 }
